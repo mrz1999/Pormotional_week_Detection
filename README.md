@@ -2,7 +2,7 @@
 
 
 This is the first step (out of 2) of the FATER AWARD challenge organized by FATER. 
-We were asked to detect the promotional weeks applied by their customers (supermarkets) on their products for sale.  
+We were asked to detect the promotional weeks applied by their customers (supermarkets) on their products for sale. So it is a Classification Problem.
 We applied the anomaly detection and the SVM to accomplish this task.
 
 We had a data-set with 31239 rows and 11 features (name of the customer, date (week), units sold in that week, price per units, volume (number of units 
