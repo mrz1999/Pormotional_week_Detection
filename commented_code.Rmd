@@ -1,0 +1,1285 @@
+---
+title: FATER PROJECT
+subtitle: Università degli Studi di Napoli Federico II
+output: rmdformats::material
+---
+
+# Software and Packages
+
+**R version 4.1.2 (2021-11-01)**
+
+**IDE: R-Studio**
+
+These are the packages we used. The reasons why we used these packages are in the report.
+```{r packages, echo=TRUE, results = "markup", error=FALSE, warning=FALSE, message=FALSE}
+library(tidyverse) 
+library(aweek)   
+library(gridExtra) 
+library(readxl) 
+library(plotly) 
+library(FactoMineR) 
+library(Factoshiny)
+library(factoextra)
+library(ggcorrplot) 
+library(anomalize)
+library(forecast) 
+library(snpar) 
+library(fastDummies) 
+library(e1071) 
+library(pROC)
+library(knitr) 
+library(GGally)
+```
+
+# Data Cleaning steps
+
+* We import the data-set GAME_3 with the read_excel function and we assign a specific type to each of these variables. 
+
+* Afterwords we create a new variable, Date, by using the week2date function which returns a variable in date format with the year, the month and the Monday of the week specified by the variable YW which is used as argument of week2date. 
+
+* Moreover we remove the PriceUnits and PriceVolume variables and we create new ones with the same names (for the reasons explained in the report) and also a WeightedUnits variable. 
+
+* We use the filter function for removing the Inf values.
+```{r load the data and cleaning, message=FALSE, warning=FALSE}
+GAME_3 <- read_excel("GAME 3.xlsx", col_types = c("text", "text", "text", "numeric", "numeric","numeric","numeric", "numeric", "numeric","numeric", "numeric"))
+
+GAME_3 <- GAME_3 %>%
+  mutate(Date = week2date(YW, week_start = "Monday")) %>%
+  select(-PriceUnits, -PriceVolume)
+
+GAME_3 <- GAME_3 %>%
+  mutate(PriceUnits = Value/Units, PriceVolume = Value/Volume ) %>%
+  mutate(WeightedUnits = Units/WD) %>%
+  select(CUSTOMER, PRODOTTO, YW, Date, Units,PriceUnits, Volume, PriceVolume, Value, WD, WeightedUnits)
+
+summary(GAME_3)
+
+GAME_3 <- GAME_3 %>%
+  filter(PriceVolume != Inf)
+
+summary(GAME_3)
+```
+
+We create different data-sets for each customer by filtering the data-set according to the CUSTOMER variable.
+```{r customers, message=FALSE, warning=FALSE}
+Customer_A <- GAME_3 %>%
+  filter(CUSTOMER == "Customer A")
+
+Customer_B <- GAME_3 %>%
+  filter(CUSTOMER == "Customer B")
+
+Customer_C <- GAME_3 %>%
+  filter(CUSTOMER == "Customer C")
+
+Customer_D <- GAME_3 %>%
+  filter(CUSTOMER == "Customer D")
+
+Customer_E <- GAME_3 %>%
+  filter(CUSTOMER == "Customer E")
+
+Customer_F <- GAME_3 %>%
+  filter(CUSTOMER == "Customer F")
+
+Customer_G <- GAME_3 %>%
+  filter(CUSTOMER == "Customer G")
+
+Customer_H <- GAME_3 %>%
+  filter(CUSTOMER == "Customer H")
+```
+
+* First, we display the number of rows of the data-set obtained by grouping the GAME_3 data-set for the CUSTOMER and the PRODOTTO variables and by creating a new variable, unique_Date (which returns only the unique dates for each CUSTOMER and PRODOTTO) and by removing all the other variables but CUSTOMER and PRODOTTO.
+
+* Second, we display the number of rows of the whole GAME_3 data-set
+
+The aim is to show that these two numbers are different and so there is some overlapping dates for some CUSTOMER, PRODOTTO pair.
+```{r date problem 1, message=FALSE, warning=FALSE}
+
+nrow(GAME_3 %>%
+  group_by(CUSTOMER, PRODOTTO) %>%
+  summarise(unique_Date = unique(Date))) 
+
+nrow(GAME_3)
+
+```
+
+* We do the same we made above for the whole GAME_3 data-set but now separately for each customer.
+
+* Then we create a vector with all these integers that we call unique_dates and we put it into a data-frame (customer_data_problem) with three columns:
+  * Customer. Represents the unique customer of the GAME_3 data-set;
+  * unique_dates;
+  * not_unique_dates which are the rows of the data-sets obtained above by filtering GAME_3 for each customer.
+  
+In the data-frame we can see that all the 25 repeated dates are in the customer B
+```{r date problem 2, message=FALSE, warning=FALSE}
+a <- nrow(Customer_A %>%
+       group_by(PRODOTTO) %>%
+       summarise(unique_n = unique(Date))) # No dates repeated for the Customer_A
+
+b <- nrow(Customer_B %>%
+       group_by(PRODOTTO) %>%
+       summarise(unique_n = unique(Date))) # 25 dates repeated (so, all the repeated data are in this Customer)
+c <- nrow(Customer_C %>%
+       group_by(PRODOTTO) %>%
+       summarise(unique_n = unique(Date))) 
+d <- nrow(Customer_D %>%
+       group_by(PRODOTTO) %>%
+       summarise(unique_n = unique(Date))) 
+e <- nrow(Customer_E %>%
+       group_by(PRODOTTO) %>%
+       summarise(unique_n = unique(Date))) 
+f <- nrow(Customer_F %>%
+       group_by(PRODOTTO) %>%
+       summarise(unique_n = unique(Date))) 
+g <- nrow(Customer_G %>%
+       group_by(PRODOTTO) %>%
+       summarise(unique_n = unique(Date))) 
+h <- nrow(Customer_H %>%
+       group_by(PRODOTTO) %>%
+       summarise(unique_n = unique(Date))) 
+
+customer_data_problem <- as.data.frame(tibble(
+  Customer = unique(GAME_3$CUSTOMER),
+  unique_dates = c(a, b, c, d, e, f, g, h),
+  not_unique_dates = c(dim(Customer_A)[1], dim(Customer_B)[1], dim(Customer_C)[1], 
+                       dim(Customer_D)[1], dim(Customer_E)[1], dim(Customer_F)[1],
+                       dim(Customer_G)[1], dim(Customer_H)[1])
+))
+
+```
+
+
+* unique_date_CUSTOMER_B is a data-frame with two columns (PRODOTTO and unique_Date) representing the unique dates for the Customer_B. 
+
+* number_date_Customer_B and unique_number_date_CUSTOMER_B are two data-set with PRODOTTO and the number of weeks for each product. The difference is that in the latter only the unique dates are considered.
+
+* checking_overlapping_dates is a data-frame with 4 columns: PRODOTTO, the number of not unique dates for each PRODOTTO, the number of unique dates for each PRODOTTO and a Boolean variable which returns TRUE if the values of the second and the third variables are the same, otherwise it returns FALSE.
+
+* Eventually we create an interactive plot by using the plotly function. Basically we create a bar plot with a bar (colored in dark blue) for each product and the height representing the number of not unique dates. Then we plot on the previous plot another bar plot (using add_trace), but this time by using the unique dates and the bars are colored blue. 
+
+We can see that all the 25 overlapping dates are in the COMPETITION 2.
+
+```{r date problem 3,message=FALSE, warning=FALSE, fig.dim=c(9,9) }
+unique_date_CUSTOMER_B <- GAME_3 %>%
+  filter(CUSTOMER == "Customer B") %>% 
+  group_by(PRODOTTO) %>%
+  summarise(unique_Date = unique(Date)) # Here there are only the unique dates (see unique_number_date_CUSTOMER_B to understand why we wrote this)
+
+number_date_Customer_B <- Customer_B %>%
+  group_by(PRODOTTO) %>%
+  summarise(n_product = n()) 
+
+unique_number_date_CUSTOMER_B <- unique_date_CUSTOMER_B %>%
+  group_by(PRODOTTO) %>%
+  summarise(n_product = n()) 
+
+checking_overlapping_dates <- number_date_Customer_B %>%
+  mutate(dates_with_overlapping = unique_number_date_CUSTOMER_B$n_product) %>% mutate(is_overlapping = number_date_Customer_B$n_product != unique_number_date_CUSTOMER_B$n_product)
+
+fig <- plot_ly(checking_overlapping_dates, x = ~PRODOTTO, y = ~n_product, type = 'bar', name="not unique",
+        marker = list(color = 'rgb(55, 83, 109)'))
+
+fig <- fig %>% add_trace(y = ~dates_with_overlapping, name = 'unique', marker = list(color = 'rgb(26, 118, 255)'))
+
+fig <- fig %>% layout(
+         xaxis = list(
+           title = "Dates",
+           tickfont = list(
+             size = 14,
+             color = 'rgb(107, 107, 107)')),
+         yaxis = list(
+           title = 'Count',
+           titlefont = list(
+             size = 16,
+             color = 'rgb(107, 107, 107)'),
+           tickfont = list(
+             size = 14,
+             color = 'rgb(107, 107, 107)')),
+         legend = list(x = 100, y = 1, bgcolor = 'rgba(255, 255, 255, 0)', bordercolor = 'rgba(255, 255, 255, 0)'),
+         barmode = 'group', bargap = 0.15, bargroupgap = 0.1)
+
+fig
+```
+
+
+This chunk returns the 25 overlapping dates from the data-set of the COMPETITION 2 for the Customer_B.
+
+* First we create two empty list (Storage and Storage2). In Storage we will put all the dates of Customer_B_COMPETITION_2 and in Storage2 we will put only the overlapping dates.
+
+* The for loop iterates for i that goes from 1 to the number of rows of the data-set of COMPETITION 2 for the Customer_B. If a specific week is already into the Storage vector, then the program appends this week in Storage2.
+
+```{r date problem 4,message=FALSE, warning=FALSE}
+Customer_B_COMPETITION_2 <- Customer_B %>% filter(PRODOTTO == "COMPETITION 2")
+
+Storage <- vector(mode = "list")
+
+Storage2 <- vector(mode = "list")
+
+for (i in 1:dim(Customer_B_COMPETITION_2)[1]){
+    if (Customer_B_COMPETITION_2$YW[i] %in% Storage){
+    Storage2 <- append(Storage2, Customer_B_COMPETITION_2$YW[i])
+  }
+  Storage[i] <- Customer_B_COMPETITION_2$YW[i]
+}
+```
+
+
+This is the plot of the PriceUnits for COMPETITION 2 of the Customer B. 
+```{r date problem 5, message=FALSE, warning=FALSE }
+Customer_B %>%
+  filter(PRODOTTO == "COMPETITION 2") %>%
+  plot_ly(type = 'scatter', mode = 'lines', fill = 'tozeroy', line = list(color = 'rgb(255,100,0)'))%>%
+  add_trace(x = ~Date, y = ~PriceUnits)%>%
+  layout(showlegend = F) %>%
+  layout(
+    xaxis = list(zerolinecolor = 'rgba(152, 251, 152, 0.75)',
+                 zerolinewidth = 2,
+                 gridcolor = 'rgba(152, 251, 152, 0.75)',
+                 dtick = "M1"),
+    yaxis = list(zerolinecolor = 'rgba(152, 251, 152, 0.75)',
+                 zerolinewidth = 2,
+                 gridcolor = 'rgba(152, 251, 152, 0.75)'),
+    plot_bgcolor='#a2fba2',paper_bgcolor = "rgb(255,255,255)")
+```
+
+From the previous steps we notice that after the date in the row 74 (2021-03-22) the data follow a new trend. Therefore we decide not only to remove the 25 overlapping dates but in general all the dates after the row 74 until the last one (row 118).
+```{r data problem 6,message=FALSE, warning=FALSE}
+Customer_B_COMPETITION_2 <- Customer_B %>% 
+  filter(PRODOTTO == "COMPETITION 2")
+
+Customer_B_COMPETITION_2 <- Customer_B_COMPETITION_2 [-c(75:118),]
+```
+
+
+# Correlation Variables 
+
+* We select just the Units, PriceUnits, Volume, PriceVolume, Value and WD for calculating the correlation matrix.
+
+* We get the correlation matrix simply by using the built in function cor with, as argument, GAME_3_no_date.
+
+* With ggcorrplot (from the library ggcorrplot) we represent this table in a nice plot.
+
+* With ggpairs (from the library GGally) we build a matrix with the upper part as correlational matrix and the lower part the pairs.
+
+```{r Correlation,message=FALSE, warning=FALSE,fig.dim=c(9,9)}
+GAME_3_no_date <- GAME_3 %>%
+  select(Units:WD)
+
+corr_GAME_3_no_date <- cor(GAME_3_no_date)
+
+ggcorrplot(corr_GAME_3_no_date, hc.order = TRUE, lab = TRUE, type = "lower") +       theme(panel.background = element_rect(color = "#009999"),
+                                                                                           panel.grid.major = element_line("white"))
+
+ggpairs(GAME_3_no_date, axisLabels =  "none",
+        upper = list(continuous = wrap("cor")),
+        lower = list(continuous = wrap("points", size = 1, color="aquamarine3", alpha = 1)),
+        diag = list(continuous = "blankDiag")) + theme_bw() 
+```
+
+Our main question is: **"Why the scatterplot of PriceUnits-PriceVolume is like that?"**.
+The correlation should be highly positive since the Volume is equal to the Units times a constant, whereas as we can see after the plot, in our case the correlation is negative.
+
+* First, we show the scatter-plot with PriceUnits and PriceVolume;
+
+* Then, we show the correlation of these two variables for the whole GAME_3 data-frame.
+```{r plot PriceUnits/PriceVolume,message=FALSE, warning=FALSE}
+GAME_3 %>% ggplot(mapping = aes(PriceUnits, PriceVolume)) + geom_point()
+
+cor(GAME_3$PriceUnits, GAME_3$PriceVolume)
+
+```
+
+The answer to our question is that in this plot we take into account all the products. So, since each product has a specific ratio between Units and Volume and consequently between PriceUnits and PriceVolume, with this plot we end up displaying different and confusing information all together.
+
+We create two tables, one with the ratio between Volume and Units and one with the ratio between PriceVolume and PriceUnits.
+
+* prV_prU is a data-set with two columns: PRODOTTO and ratio_prices (representing the ratio between the average of PriceVolume and the average of PriceUnits organized in descending order for each product).
+
+* V_U is a data-set with two columns: PRODOTTO and ratio_prices (representing the ratio between the average of Volume and the average of Units organized in descending order for each product).
+```{r ratios tables,message=FALSE, warning=FALSE}
+
+# The ratios between PriceVolume and PriceUnits can vary from 1 to 17
+prV_prU <- GAME_3 %>% 
+  group_by(PRODOTTO) %>% 
+  summarize(ratio_prices = mean(PriceVolume)/mean(PriceUnits)) %>% 
+  arrange(desc(ratio_prices))
+
+# The ratios between Volume and Units can vary from 0.05590794 to 0.91535382
+V_U <- GAME_3 %>% 
+  group_by(PRODOTTO) %>% 
+  summarize(ratio_Vol_Uni = mean(Volume)/mean(Units)) %>% 
+  arrange(desc(ratio_Vol_Uni))
+
+```
+
+* Build a ds data-set by filtering GAME_3 for three different products (the reason why we choose these three products is in the report);
+
+* Display a scatter-plot of ds with x = PriceUnits, y = Pricevolume colored by PRODOTTO.
+
+```{r plot three products,message=FALSE, warning=FALSE}
+ds <- GAME_3 %>% filter(PRODOTTO == "COMPETITION 7" |
+                    PRODOTTO == "COMPETITION 1"|
+                    PRODOTTO == "BABY DRY BOX") 
+
+ggplot(ds, mapping = aes(PriceUnits, PriceVolume, color = PRODOTTO)) +
+  geom_point()
+
+```
+
+* display a plot of ds with x = PriceUnits and y = PriceVolume;
+
+* display the correlation of PriceUnits and PriceVolume for the data-set ds.
+```{r as before no color,message=FALSE, warning=FALSE}
+ggplot(ds, mapping = aes(PriceUnits, PriceVolume)) +
+  geom_point()
+
+cor(ds$PriceUnits, ds$PriceVolume)
+```
+
+The following are 3 plots and 3 correlations of the three different products according to we built the ds data-set. 
+```{r three plots,message=FALSE, warning=FALSE}
+ggplot(ds %>% filter(PRODOTTO == 'BABY DRY BOX'), mapping = aes(PriceUnits, PriceVolume)) + geom_point(color = '#F8766D') +
+  scale_x_continuous(limits = c(0,70)) +
+  scale_y_continuous(limits = c(0,260))
+
+cor((ds %>% filter(PRODOTTO == 'BABY DRY BOX'))$PriceVolume,(ds %>% filter(PRODOTTO == 'BABY DRY BOX'))$PriceUnits)
+
+ggplot(ds %>% filter(PRODOTTO == 'COMPETITION 1'), mapping = aes(PriceUnits, PriceVolume)) + geom_point(color = '#00BA38') +
+  scale_x_continuous(limits = c(0,70)) +
+  scale_y_continuous(limits = c(0,260))
+
+cor((ds %>% filter(PRODOTTO == 'COMPETITION 1'))$PriceVolume,(ds %>% filter(PRODOTTO == 'COMPETITION 1'))$PriceUnits)
+
+ggplot(ds %>% filter(PRODOTTO == 'COMPETITION 7'), mapping = aes(PriceUnits, PriceVolume)) + geom_point(color = '#619CFF') +
+  scale_x_continuous(limits = c(0,70)) +
+  scale_y_continuous(limits = c(0,260))
+
+cor((ds %>% filter(PRODOTTO == 'COMPETITION 7'))$PriceVolume,(ds %>% filter(PRODOTTO == 'COMPETITION 7'))$PriceUnits)
+
+
+```
+
+Here there are the same things there are in the chunk 'Correlation' with the only difference that now we used a data-set with only one product (BABY DRY DUO DWCT) instead of the whole GAME_3.
+
+```{r corralation BABY DRY DUO DWCT,message=FALSE, warning=FALSE}
+BABY_DRY_DUO_DWCT_no_date <- GAME_3 %>%
+  filter(CUSTOMER == 'Customer A') %>%
+  filter(PRODOTTO == 'BABY DRY DUO DWCT') %>%
+  select(Units:WD)
+
+corr_BABY_DRY_DUO_DWCT_no_date <- cor(BABY_DRY_DUO_DWCT_no_date)
+
+ggcorrplot(corr_BABY_DRY_DUO_DWCT_no_date, hc.order = TRUE, lab = TRUE, type = "lower") +       theme(panel.background = element_rect(color = "#009999"),
+                                                                                           panel.grid.major = element_line("white"))
+
+ggpairs(BABY_DRY_DUO_DWCT_no_date,axisLabels =  "none",
+        upper = list(continuous = wrap("cor")),
+        lower = list(continuous = wrap("points", size = 1, color="aquamarine3", alpha = 1)),
+        diag = list(continuous = "blankDiag")) + theme_bw()
+```
+
+
+# First step of our analysis: PCA
+
+* First, we build two variables with the padding (translation of the variables of one lag) in order to introduce the time component in the PCA. The for loop for building the padding variables works as follow:
+  * for each product (notice that there is a list of the products in 'products') append the value of PriceUnits in the i+1 row at the position i of Storage_PriceUnits (we do the same for Storage_WeightedUnits). Notice that the second for loop goes from 1 to n-1 (where n is the number of rows of each specific product) because with the shift of the variable of one lag we don't consider the first observation anymore. In padding_PriceUnits and in padding_WeightedUnits there are the variables PriceUnits and WeightedUnits with the padding.
+  
+* Second, we build the first difference variables (of Units, PriceUnits and WeightedUnits) in order to introduce the time component in the PCA. The first for loop is basically the same of the first one for the padding. The second for loop iterates from i that goes from 2 to the number of rows of each specific product. The reason why we decide to iterate from 2 is that we have to compute the difference between each two contiguous values of the variables, therefore if we have started from 1, we would have got an error message. The workflow is always the same: we append the differences that we computed in all_diff_1_Units, all_diff_1_PriceUnits and all_diff_1_WeightedUnits.
+
+* Third, we build the second difference variables in order to introduce the time component in the PCA. The workflow is exactly the same of the first differences, but now the second for loop iterates for i that goes from 3 to the number of rows of each specific product because we have to compute the difference between the first differences at time i and the first differences at time i-1, so, since the first difference variables have as first value a NA we have to start iterating from 3.
+
+* Afterwords, we create a new data-set, Customer_A_all by attaching in the Customer_A data-set the variables we have just created.
+
+* The last step before starting the PCA is the scaling. Since the PCA analyzes the interdependence of the variables, these ones must have the same unit of measure. So, we have to standardize them. To do so, we use the built in scale function.
+
+* Now we can start the PCA. We build the principal components on the Customer_A_all data-set in which we substitute the name of the rows with the concatenation of Date and PRODOTTO in order to get as points this concatenation.
+
+* We leveraged the Factoshiny function (of the package Factoshiny) and after choosing the levels of specific parameters we copied the code given by Factoshiny and we attached it in the last part of this chunk. Basically the most important code is res.PCA which creates the PCA model with all the variables but the first and the second differences, which we used as supplementary ones.
+
+```{r unique PCA for all the products of Customer A, message=FALSE, warning=FALSE}
+# PADDING
+
+products <- unique(Customer_A$PRODOTTO)
+
+padding_PriceUnits <- vector(mode = "numeric")
+
+padding_WeightedUnits <- vector(mode = "numeric")
+
+for (j in 1:length(products)){
+  
+  Storage_PriceUnits = vector(mode = "numeric")
+  Storage_WeightedUnits = vector(mode = "numeric")
+  Storage_PriceUnits[1] = NA
+  Storage_WeightedUnits[1] = NA  
+  
+  Customer_A_product <- Customer_A %>% filter(PRODOTTO == products[j])
+  
+  for (i in 1:(dim(Customer_A_product)[1]-1)){
+    Storage_PriceUnits[i+1] = Customer_A_product$PriceUnits[i]
+    Storage_WeightedUnits[i+1] = Customer_A_product$WeightedUnits[i]
+  }
+  padding_PriceUnits <- append(padding_PriceUnits, Storage_PriceUnits)
+  padding_WeightedUnits <- append(padding_WeightedUnits, Storage_WeightedUnits)
+}
+
+# FIRST DIFFERENCES
+
+products <- unique(Customer_A$PRODOTTO)
+all_diff_1_Units <- vector(mode = "numeric")
+all_diff_1_PriceUnits <- vector(mode = "numeric")
+all_diff_1_WeightedUnits <- vector(mode = "numeric")
+
+for (j in 1:length(products)){
+  
+  Storage_Units = vector(mode = "numeric")
+  Storage_PriceUnits = vector(mode = "numeric")
+  Storage_WeightedUnits = vector(mode = "numeric")
+  
+  Customer_A_product <- Customer_A %>% filter(PRODOTTO == products[j])
+  
+  for (i in 2:dim(Customer_A_product)[1]){
+  Storage_Units[i] = Customer_A_product$Units[i] - Customer_A_product$Units[i-1]
+  Storage_PriceUnits[i] = Customer_A_product$PriceUnits[i] - Customer_A_product$PriceUnits[i-1]
+  Storage_WeightedUnits[i] = Customer_A_product$WeightedUnits[i] - Customer_A_product$WeightedUnits[i-1]
+  
+  }
+  all_diff_1_Units <- append(all_diff_1_Units, Storage_Units)
+  all_diff_1_PriceUnits <-  append(all_diff_1_PriceUnits, Storage_PriceUnits)
+  all_diff_1_WeightedUnits <-  append(all_diff_1_WeightedUnits, Storage_WeightedUnits)
+}
+
+# SECOND DIFFERENCES
+
+products <- unique(Customer_A$PRODOTTO)
+all_diff_2_Units <- vector(mode = "numeric")
+all_diff_2_PriceUnits <- vector(mode = "numeric")
+all_diff_2_WeightedUnits <- vector(mode = "numeric")
+
+for (j in 1:length(products)){
+  
+  Storage_Units = vector(mode = "numeric")
+  Storage_PriceUnits = vector(mode = "numeric")
+  Storage_WeightedUnits = vector(mode = "numeric")
+  
+  Customer_A_product <- Customer_A %>% filter(PRODOTTO == products[j])
+  
+  for (i in 3:dim(Customer_A_product)[1]){
+  Storage_Units[i] = all_diff_1_Units[i] - all_diff_1_Units[i-1]
+  Storage_PriceUnits[i] = all_diff_1_PriceUnits[i] - all_diff_1_PriceUnits[i-1]
+  Storage_WeightedUnits[i] = all_diff_1_WeightedUnits[i] - all_diff_1_WeightedUnits[i-1]
+  
+  }
+  all_diff_2_Units <- append(all_diff_2_Units, Storage_Units)
+  all_diff_2_PriceUnits <-  append(all_diff_2_PriceUnits, Storage_PriceUnits)
+  all_diff_2_WeightedUnits <-  append(all_diff_2_WeightedUnits, Storage_WeightedUnits)
+}
+
+# --- #
+Customer_A_all <- Customer_A %>%
+  mutate(diff_1_Units = all_diff_1_Units) %>%
+  mutate(diff_1_PriceUnits = all_diff_1_PriceUnits) %>%
+  mutate(diff_1_WeightedUnits = all_diff_1_WeightedUnits) %>%
+  mutate(diff_2_Units = all_diff_2_Units) %>%
+  mutate(diff_2_PriceUnits = all_diff_2_PriceUnits) %>%
+  mutate(diff_2_WeightedUnits = all_diff_2_WeightedUnits) %>%
+  mutate(padding_PriceUnits = padding_PriceUnits) %>%
+  mutate(padding_WeightedUnits = padding_WeightedUnits)
+  
+
+Customer_A_all <- Customer_A_all %>%
+  group_by(PRODOTTO) %>%
+  mutate(scaled_Units = scale(Units)) %>%
+  mutate(scaled_PriceUnits = scale(PriceUnits)) %>%
+  mutate(scaled_PriceVolume = scale(PriceVolume)) %>%
+  mutate(scaled_Volume = scale(Volume)) %>%
+  mutate(scaled_Value = scale(Value)) %>%
+  mutate(scaled_WD = scale(WD)) %>%
+  mutate(scaled_WeightedUnits = scale(WeightedUnits)) %>%
+  mutate(scaled_diff_1_Units = scale(diff_1_Units)) %>%
+  mutate(scaled_diff_1_PriceUnits = scale(diff_1_PriceUnits)) %>%
+  mutate(scaled_diff_1_WeightedUnits = scale(diff_1_WeightedUnits)) %>%
+  mutate(scaled_diff_2_Units = scale(diff_2_Units)) %>%
+  mutate(scaled_diff_2_PriceUnits = scale(diff_2_PriceUnits)) %>%
+  mutate(scaled_diff_2_WeightedUnits = scale(diff_2_WeightedUnits)) %>%
+  mutate(scaled_padding_PriceUnits = scale(padding_PriceUnits)) %>%
+  mutate(scaled_padding_WeightedUnits = scale(padding_WeightedUnits)) %>%
+  select(CUSTOMER:Date, scaled_Units:scaled_padding_WeightedUnits)
+
+# ALL THE DATES (3566)
+Customer_A_all <- Customer_A_all %>%
+  mutate(Date_Prodotto = str_c(Date, "-", PRODOTTO))
+
+Customer_A_all <-as.data.frame(Customer_A_all)
+
+rownames(Customer_A_all) <- Customer_A_all$Date_Prodotto
+
+Customer_A_all_no_dates <- Customer_A_all %>%
+  select(scaled_Units:scaled_padding_WeightedUnits)
+
+#Factoshiny(Customer_A_all_no_dates)
+
+# First and Second differences as supplementary
+nb <- missMDA::estim_ncpPCA(Customer_A_all_no_dates,quanti.sup=c(8,9,10,11,12,13))$ncp
+
+dfcompleted <- missMDA::imputePCA(Customer_A_all_no_dates,ncp=nb,quanti.sup=c(8,9,10,11,12,13))$completeObs
+
+res.PCA<-PCA(dfcompleted,quanti.sup=c(8,9,10,11,12,13),scale.unit=FALSE,graph=FALSE)
+
+plot.PCA(res.PCA,choix='var',cex=0.8,cex.main=0.8,cex.axis=0.8,col.quanti.sup='#00A9B8')
+```
+
+* With fviz_eig we show the scree-plot in order to see how much variance each dimension explains.
+
+* We assign to b a data frame containing the first two dimensions and then we attach them to Customer_A_all.
+
+* Eventually in this chunk two plots are shown: an animated plot with plotly that allows to see the Dim.1 and Dim.2 scatterplot for each single product of Customer_A_all; a static Dim.1 Dim.2 scatterplot with all the points of Customer_A_all colored by product.
+
+```{r unique PCA for all the products of Customer A 2, message=FALSE, warning=FALSE}
+fviz_eig(res.PCA)
+
+b <- as.data.frame(get_pca_ind(res.PCA)$coord) # To get the first two dimensions
+
+# --- #
+
+Customer_A_all <- Customer_A_all %>%
+  mutate(Dim.1 = b$Dim.1) %>%
+  mutate(Dim.2 = b$Dim.2)
+
+df <- Customer_A_all %>%
+  select(PRODOTTO, Dim.1, Dim.2)
+
+plot_ly(df, color = ~PRODOTTO, size = ~Dim.1 ) %>%
+  add_markers(x = df$Dim.1, y = df$Dim.2, frame = df$PRODOTTO) %>%
+  animation_opts(frame = 3100, transition = 3000, redraw = T) %>%
+  layout(showlegend = FALSE)
+
+Customer_A_all %>%
+  ggplot(mapping = aes(Dim.1, Dim.2, color = PRODOTTO)) +
+  geom_jitter(size = 1.5, show.legend = F)
+```
+
+# Our Plots
+
+* **Units**
+
+* Here we show a time series plot (x axis = Date and y axis = Units) of the Units for the product BABY DRY DUO DWCY of the Customer A. 
+
+* After creating Customer_A_BABY_DRY_DUO_DWCT which is the data-set of only the BABY DRY DUO DWCT product of the customer A, we attach to this data-set the moving averages centered and of order 12 (i.e. 12 weeks) of the Units (ma_units) and of the PriceUnits (ma_prices).
+
+* Eventually we show the time series with also ma_units and with the usual aesthetics.
+
+```{r plot Units and PriceUnits BABY DRY DUO DWCT, message=FALSE, warning=FALSE}
+Customer_A_BABY_DRY_DUO_DWCT <- GAME_3 %>%
+  filter(CUSTOMER == 'Customer A') %>%
+  filter(PRODOTTO == 'BABY DRY DUO DWCT')
+
+Customer_A_BABY_DRY_DUO_DWCT <- Customer_A_BABY_DRY_DUO_DWCT %>%
+  mutate(ma_units = ma(Customer_A_BABY_DRY_DUO_DWCT$Units, order = 12, centre = TRUE)) %>%
+  mutate(ma_prices = ma(Customer_A_BABY_DRY_DUO_DWCT$PriceUnits, order = 12, centre = TRUE))
+
+Customer_A_BABY_DRY_DUO_DWCT %>%
+  plot_ly(x = ~Date, y = ~Units, type = 'scatter', mode = 'lines',fill = 'tozeroy',fillcolor = 'rgba(255,100,0,0.5)', line = list(color = 'rgb(255,100,0)')) %>%
+  add_trace(x = ~Date, y = ~ma_units, type = 'scatter', mode = 'lines', fill = FALSE, line = list(color = '#009966')) %>%
+  layout(showlegend = F, title='BABY DRY DUO DWCT (Units)') %>%
+  layout(
+    xaxis = list(zerolinecolor = 'rgba(152, 251, 152, 0.75)',
+                 zerolinewidth = 2,
+                 gridcolor = 'rgba(152, 251, 152, 0.75)',
+                 dtick = "M1",
+                 rangeselector = list(
+                   buttons = list(
+                     list(count=1, label="1m", step="month", stepmode="backward"),
+                     list(count=6, label="6m", step="month", stepmode="backward"),
+                     list(count=1, label="YTD", step="year", stepmode="todate"),
+                     list(count=1, label="1y", step="year", stepmode="backward"),
+                     list(step="all")
+                   )
+                 )),
+    yaxis = list(zerolinecolor = 'rgba(152, 251, 152, 0.75)',
+                 zerolinewidth = 2,
+                 gridcolor = 'rgba(152, 251, 152, 0.75)'),
+    plot_bgcolor='#a2fba2',paper_bgcolor = "rgb(255,255,255)")
+
+```
+
+* **PriceUnits**
+
+* Here we show the time series of the PriceUnits (x axis = Date, y axis = PriceUnits) with also ma_prices. The aesthetics are always the same.
+
+```{r plot Units and PriceUnits 2 BABY DRY DUO DWCT, message=FALSE, warning=FALSE}
+Customer_A_BABY_DRY_DUO_DWCT %>%
+  plot_ly(x = ~Date, y = ~PriceUnits, type = 'scatter', mode = 'lines',fill = 'tozeroy',fillcolor = 'rgba(255,100,0,0.5)', line = list(color = 'rgb(255,100,0)')) %>%
+  add_trace(x = ~Date, y = ~ma_prices, type = 'scatter', mode = 'lines', fill = FALSE, line = list(color = '#009966')) %>%
+  layout(showlegend = F, title='BABY DRY DUO DWCT (PriceUnits)') %>%
+  layout(
+    xaxis = list(zerolinecolor = 'rgba(152, 251, 152, 0.75)',
+                 zerolinewidth = 2,
+                 gridcolor = 'rgba(152, 251, 152, 0.75)',
+                 dtick = "M1",
+                 rangeselector = list(
+                   buttons = list(
+                     list(count=1, label="1m", step="month", stepmode="backward"),
+                     list(count=6, label="6m", step="month", stepmode="backward"),
+                     list(count=1, label="YTD", step="year", stepmode="todate"),
+                     list(count=1, label="1y", step="year", stepmode="backward"),
+                     list(step="all")
+                   )
+                 )),
+    yaxis = list(zerolinecolor = 'rgba(152, 251, 152, 0.75)',
+                 zerolinewidth = 2,
+                 gridcolor = 'rgba(152, 251, 152, 0.75)'),
+    plot_bgcolor='#a2fba2',paper_bgcolor = "rgb(255,255,255)")
+
+
+```
+
+
+
+
+* Here we create also the moving average for the WeightedUnits variable, we attach it in the Customer_A_BABY_DRY_DUO_DWCT data-set and eventually we display the same plot as before but now with WeightedUnits and ma_WeightedUnits.
+
+```{r plot Weighted units BABY DRY DUO DWCT, message=FALSE, warning=FALSE}
+Customer_A_BABY_DRY_DUO_DWCT <- Customer_A_BABY_DRY_DUO_DWCT %>%
+  mutate(ma_WeightedUnits = ma(Customer_A_BABY_DRY_DUO_DWCT$WeightedUnits, order = 12, centre = TRUE))
+
+Customer_A_BABY_DRY_DUO_DWCT %>%
+  plot_ly(x = ~Date, y = ~WeightedUnits, type = 'scatter', mode = 'lines',fill = 'tozeroy',fillcolor = 'rgba(255,100,0,0.5)', line = list(color = 'rgb(255,100,0)')) %>%
+  add_trace(x = ~Date, y = ~ma_WeightedUnits, type = 'scatter', mode = 'lines', fill = FALSE, line = list(color = '#009966')) %>%
+  layout(showlegend = F, title='BABY DRY DUO DWCT (WeightedUnits)') %>%
+  layout(
+    xaxis = list(zerolinecolor = 'rgba(152, 251, 152, 0.75)',
+                 zerolinewidth = 2,
+                 gridcolor = 'rgba(152, 251, 152, 0.75)',
+                 dtick = "M1",
+                 rangeselector = list(
+                   buttons = list(
+                     list(count=1, label="1m", step="month", stepmode="backward"),
+                     list(count=6, label="6m", step="month", stepmode="backward"),
+                     list(count=1, label="YTD", step="year", stepmode="todate"),
+                     list(count=1, label="1y", step="year", stepmode="backward"),
+                     list(step="all")
+                   )
+                 )),
+    yaxis = list(zerolinecolor = 'rgba(152, 251, 152, 0.75)',
+                 zerolinewidth = 2,
+                 gridcolor = 'rgba(152, 251, 152, 0.75)'),
+    plot_bgcolor='#a2fba2',paper_bgcolor = "rgb(255,255,255)")
+```
+
+# Second step of our analysis: **Anomaly Detection**
+
+The Anomaly Detection is the most accurate method for analyzing time series, taking into account the different components of the series: seasonality and trend. It's an univariate method and we decide to perform it on the first dimension obtained by the PCA.
+
+* First, we check if the trend component is present in our series. We built a vector called 'time' which contains all the natural numbers between 1 and the length of our data set in ascendant order.
+
+* We build another data set ( testing_BABY_DRY_DUO_DWCT ) in which we put only the columns we are interesting for performing the tests.
+
+* For checking the presence of a linear trend we perform a linear regression between time and the first dimension.
+
+* For checking the presence of a quadratic trend we perform a linear regression between the time, the squared time and the first dimension.
+
+* As a further confirmation, we use another test: the Cox-Stuart test, which checks the presence of monotonic trend.
+
+```{r (2 step) Anomaly detection (checking trend) BABY DRY DUO DWCT, message=FALSE, warning=FALSE, include=FALSE}
+
+Customer_A_all_BABY_DRY_DUO_DWCT <- Customer_A_all %>%
+  filter(PRODOTTO == "BABY DRY DUO DWCT")
+
+time <- seq(1, dim(Customer_A_all_BABY_DRY_DUO_DWCT)[1])
+
+testing_BABY_DRY_DUO_DWCT <- Customer_A_all_BABY_DRY_DUO_DWCT %>%
+  select(YW, Date, Dim.1 ) %>%
+  mutate(time = time) %>%
+  mutate(squared_time = time^2)
+
+reg <- lm(Dim.1~time, data = testing_BABY_DRY_DUO_DWCT)
+
+reg_squared <- lm(Dim.1~time+squared_time, data = testing_BABY_DRY_DUO_DWCT)
+
+summary(reg)
+#we compare the p-value obtained by reg with the value 0.05. If the p-value is lower than 0.05 we accept the alternative hypothesis of presence of linear trend otherwise we reject the alternative hypothesis and we accept the hypothesis of absence of linear trend.
+#In this case, the p-value of the F-Fisher test is 0.7425 so we accept the hypothesis H0 of absence of linear trend.
+
+summary(reg_squared)
+# We check the presence of quadratic trend as previous for the linear trend.
+#In this case the p-value of the F-Fisher test is 0.869 so we accept the hypothesis H0 of absence of quadratic trend.
+
+cs.test(testing_BABY_DRY_DUO_DWCT$Dim.1)
+# We check the presence of monotonic trend as previous for the linear trend.
+# In this case the p-value is 0.5296 so we accept the hypothesis H0 of absence of monotonic trend.
+
+```
+
+For checking the seasonal component, we decided to use the dummy variables.
+
+* First, we create a new column obtained by the YW column, considered only the number of the week and not the year. In such way we have the same number for the same week in different years.
+
+* By using the previous column we add the Dummy variables to our data-set. 
+
+* We perform a linear regression between the first dimension and the dummies to check the persence of seasonality.
+
+```{r (2 step) Anomaly detection (checking seasonality) BABY DRY DUO DWCT, message=FALSE, warning=FALSE}
+
+testing_BABY_DRY_DUO_DWCT <- testing_BABY_DRY_DUO_DWCT %>%
+  mutate(YW = substring(YW, 7))
+
+testing_BABY_DRY_DUO_DWCT <- dummy_cols(testing_BABY_DRY_DUO_DWCT, select_columns = "YW")
+
+reg_seasonality <- lm(Dim.1~  YW_00 + YW_01 + YW_02 + YW_03 + YW_04 +
+                      YW_05 + YW_06 + YW_07 + YW_08 + YW_09 +
+                      YW_10 + YW_11 + YW_12 + YW_13 + YW_14 +
+                      YW_15 + YW_16 + YW_17 + YW_18 + YW_19 +
+                      YW_20 + YW_21 + YW_22 + YW_23 + YW_24 + 
+                      YW_25 + YW_26 + YW_27 + YW_28 + YW_29 +
+                      YW_30 + YW_31 + YW_32 + YW_33 + YW_34 + 
+                      YW_35 + YW_36 + YW_37 + YW_38 + YW_39 +
+                      YW_40 + YW_41 + YW_42 + YW_43 + YW_44 + 
+                      YW_45 + YW_46 + YW_47 + YW_48 + YW_49 +
+                      YW_50 + YW_51, data = testing_BABY_DRY_DUO_DWCT)
+
+summary(reg_seasonality)
+# We check the presence of seasonality as previous for the linear trend.
+#the F-Fisher test p-value is 0.0009432 so we accept the alternative hypotesis of presence of seasonality.
+```
+
+We check the presence of trend or seasonality for choosing which method to use in the anomaly function: Twitter or STL (for further information check the Report). In this case we have no trend component but we have the seasonal component, so we decide to use Twitter method.
+
+* We use the function  
+      - 'time_decompose' for decomposing the trend and seasonal components of our series;
+      - 'anomalize' for finding the anomalies in the decomposed series;
+      - 'time_recompose' to recompose our time series with the previously eliminated components.
+      
+* We plot our recomposed time series with the bands identifying which are anomaly point and which are not. The anomaly points are the red ones.
+
+* Eventually we create a date-set (anomaly_results) which contains only the information about the points which are anomalies.
+
+```{r (2 step) Anomaly detection BABY DRY DUO DWCT, message=FALSE, warning=FALSE}
+
+Customer_A_all_BABY_DRY_DUO_DWCT <- as_tibble(Customer_A_all_BABY_DRY_DUO_DWCT)
+
+data_anomalized <- Customer_A_all_BABY_DRY_DUO_DWCT %>%
+  time_decompose(Dim.1, method = 'twitter', merge = TRUE) %>%
+  anomalize(remainder, alpha = 0.1) %>%
+  time_recompose()
+
+data_anomalized %>% 
+  plot_anomalies(time_recomposed = T) +
+  ggtitle(label ='α = 0.1') + 
+  theme(panel.background = element_rect(fill = "white"),
+        plot.title = element_text(color = "#009999", face = "bold", hjust = 0.5),
+        panel.grid.minor = element_blank())
+
+anomaly_results <- data_anomalized %>%
+  filter(anomaly == 'Yes')
+
+```
+
+# Third step of our analysis: **Validation**
+
+##  **K-means**
+
+* First we create a new vector which contains all the dates of the product that we are considering.
+
+* We create a new data-set (Customer_A_all_BABY_DRY_DUO_DWCT_no_date) which contains only some columns of the original data-set: those which contain the useful information for the classification. 
+
+* Furthermore, we change the name of the rows with the concatenation of the name of the product and the Date.
+
+* The function fviz_nbclust (from the library factoextra) builds the elbow plot by considering the "WSS" (Within Sum of Square).
+
+```{r (3 step) K-means BABY DRY DUO DWCT, message=FALSE, warning=FALSE}
+dates_BABY_DRY_DUO_DWCT <- (Customer_A %>% filter(PRODOTTO == "BABY DRY DUO DWCT"))$Date
+
+Customer_A_all_BABY_DRY_DUO_DWCT_no_date <- Customer_A_all %>%
+  filter(PRODOTTO == "BABY DRY DUO DWCT") %>%
+  select(scaled_Units:scaled_WeightedUnits, scaled_padding_PriceUnits, scaled_padding_WeightedUnits)
+
+rownames(Customer_A_all_BABY_DRY_DUO_DWCT_no_date) <- dates_BABY_DRY_DUO_DWCT
+
+# We substituted the NA values with the means of the specific column because otherwise the fviz_nbclust function doesn't work
+Customer_A_all_BABY_DRY_DUO_DWCT_no_date$scaled_padding_PriceUnits[is.na(Customer_A_all_BABY_DRY_DUO_DWCT_no_date$scaled_padding_PriceUnits)] <- mean(Customer_A_all_BABY_DRY_DUO_DWCT_no_date$scaled_padding_PriceUnits, na.rm = T)
+
+Customer_A_all_BABY_DRY_DUO_DWCT_no_date$scaled_padding_WeightedUnits[is.na(Customer_A_all_BABY_DRY_DUO_DWCT_no_date$scaled_padding_WeightedUnits)] <- mean(Customer_A_all_BABY_DRY_DUO_DWCT_no_date$scaled_padding_WeightedUnits, na.rm = T)
+
+
+fviz_nbclust(Customer_A_all_BABY_DRY_DUO_DWCT_no_date, kmeans, method = "wss") +
+  labs(subtitle = "Elbow method")
+```
+
+* The function k-means (from the stats library) performs the k-means clustering. As input we give the number of centroids (previously choosen by looking at the elbow plot) and we decide to use an high number for nstart (that is the number of initializations) to obtain better results.
+
+* km.out contains all the information about the clustering.
+
+* The function fviz_cluster takes as input the data previously preparated and the information contained in km.cluster and it returns the plot of all the observations for the product 'BABY DRY DUO DWCT' of Customer A colored by cluster. The option repel = TRUE is used to avoid the overlapping of the dates.
+
+```{r (3 step) K-means BABY DRY DUO DWCT 2, message=FALSE, warning=FALSE}
+km.out <- kmeans(Customer_A_all_BABY_DRY_DUO_DWCT_no_date, centers = 4, nstart = 10000) 
+
+km.clusters <- km.out$cluster
+
+fviz_cluster(list(data = Customer_A_all_BABY_DRY_DUO_DWCT_no_date, cluster = km.clusters), repel = TRUE, palette = "Set1") + theme_minimal() +
+  ggtitle(label = "Cluster plot") +
+  theme(panel.background = element_rect(fill = "white"),
+        plot.title = element_text(color = "#009999", face = "bold", hjust = 0.5))
+
+# We create a new variable which contains the dates that belongs to a specified cluster, in this case we choose the cluster 2 that has high values for the first dimensions (for more details read the Relation)
+our_cluster <- as.matrix(km.clusters[km.clusters == 2])
+
+```
+
+
+
+## **Validation by plot with moving average**
+
+For confirming our results, we decide to use a moving average of order 6 which gives us a nice smoothing of the first dimension (Dim.1) time series.
+
+* For creating the moving average we use the function ma of the library forecast 
+
+* We name the rows with the relative dates for a better visualization of the results.
+
+* We create a plot, with the plot_ly function, which has on x axes the Date and on ty axes the Dim.1.  With the add_trace function we add a line which represents the moving average of order 6 previously calculated. On the upper left of the plot there are 5 buttons which allow to visualize different spans of time of our series (we can also zoom on each part of the plot by doing a window with the mouse).
+
+* Eventually, we create another data-set which contains the Date and Dim.1 columns and a new column: residuals (that represents the difference between the observed values and the m.a. (the expected values)). We order this new data-set in descendant order with respect to the residuals.
+
+The purpose (as we have already explained in the Relation) is that we want to compare the results of the two previous methods with the dates for which the residuals are higher than the others.
+
+```{r (4 step) Confirmation by plot BABY DRY DUO DWCT, message=FALSE, warning=FALSE}
+
+Customer_A_all_BABY_DRY_DUO_DWCT <- Customer_A_all_BABY_DRY_DUO_DWCT %>%
+  mutate(ma_Dim1 = (forecast::ma(Customer_A_all_BABY_DRY_DUO_DWCT$Dim.1, order = 6, centre = TRUE)))
+
+rownames(Customer_A_all_BABY_DRY_DUO_DWCT_no_date) <- dates_BABY_DRY_DUO_DWCT
+
+Customer_A_all_BABY_DRY_DUO_DWCT %>%
+  plot_ly(x = ~Date, y = ~Dim.1, type = 'scatter', mode = 'lines',fill = 'tozeroy',fillcolor = 'rgba(255,100,0,0.5)', line = list(color = 'rgb(255,100,0)')) %>%
+  add_trace(x = ~Date, y = ~ma_Dim1, type = 'scatter', mode = 'lines', fill = FALSE, line = list(color = '#009966')) %>%
+  layout(showlegend = T, title='Customer_A_all_BABY_DRY_DUO_DWCT (Dim.1)') %>%
+  layout(
+    xaxis = list(zerolinecolor = 'rgba(152, 251, 152, 0.75)',
+                 zerolinewidth = 2,
+                 gridcolor = 'rgba(152, 251, 152, 0.75)',
+                 dtick = "M1",
+                 rangeselector = list(
+                   buttons = list(
+                     list(count=1, label="1m", step="month", stepmode="backward"),
+                     list(count=6, label="6m", step="month", stepmode="backward"),
+                     list(count=1, label="YTD", step="year", stepmode="todate"),
+                     list(count=1, label="1y", step="year", stepmode="backward"),
+                     list(step="all")
+                   )
+                 )),
+    yaxis = list(zerolinecolor = 'rgba(152, 251, 152, 0.75)',
+                 zerolinewidth = 2,
+                 gridcolor = 'rgba(152, 251, 152, 0.75)'),
+    plot_bgcolor='#a2fba2',paper_bgcolor = "rgb(255,255,255)")
+
+confirmation_results_anomaly <- Customer_A_all_BABY_DRY_DUO_DWCT %>%
+  mutate(mov_avg_Dim1 = forecast::ma(Customer_A_all_BABY_DRY_DUO_DWCT$Dim.1, order = 6, centre = TRUE)) %>%
+  mutate(residuals = Dim.1 - mov_avg_Dim1) %>%
+  arrange(desc(residuals)) %>%
+  select(Date, Dim.1, residuals)
+
+```
+
+# Last step : **SVM**
+
+70% of our data are analyzed with the previous methods, the last 30% is analyzed with the Support vector machine method (SVM). 
+The following code is referred to the Customer A.
+
+* In order to built the support vector machine, first we have to create a new variable which contains the information about all the promotional weeks calculated in the 70% of the data-set (our training sample).
+We build a vector for each product of the training set with 0 and 1 as levels. 0 in correspondence of a NON-promotional week and 1 for the promotional ones.
+
+```{r Promotional week BABY DRY DUO DWCT, message=FALSE, warning=FALSE}
+svm_BABY_DRY_DUO_DWCT <- Customer_A_all %>%
+  filter(PRODOTTO == 'BABY DRY DUO DWCT') %>%
+  select(Date, Dim.1, Dim.2)
+
+# First we build a vector full of 0, that has the same length of the data-set containing only that product that we are examinating.
+promotional_week_BABY_DRY_DUO_DWCT = vector(mode = 'numeric', length = length(svm_BABY_DRY_DUO_DWCT$Date))
+
+# Using the dates calculated with the previous methods we insert 1 in the position of the promotional weeks
+for (i in 1:length(svm_BABY_DRY_DUO_DWCT$Date)){
+  if(svm_BABY_DRY_DUO_DWCT$Date[i] == '2018-11-19'| svm_BABY_DRY_DUO_DWCT$Date[i] == '2019-11-25'|svm_BABY_DRY_DUO_DWCT$Date[i] == '2020-11-23'){
+    promotional_week_BABY_DRY_DUO_DWCT[i] = 1}
+  else{
+    promotional_week_BABY_DRY_DUO_DWCT[i] = 0
+  }
+}
+```
+
+The following chunks use the same procedure just explained for the different products of the training set.
+
+```{r Promotional week COMPETITION 7, message=FALSE, warning=FALSE}
+COMPETITION_7 <- Customer_A_all %>%
+  filter(PRODOTTO == 'COMPETITION 7') %>%
+  select(Date, Dim.1)
+
+promotional_week_COMPETITION_7 = vector(mode = 'numeric', length = length(COMPETITION_7$Date))
+
+for (i in 1:length(COMPETITION_7$Date)){
+  if(COMPETITION_7$Date[i] == '2018-02-19'| COMPETITION_7$Date[i] == '2018-04-23 '|COMPETITION_7$Date[i] == '2018-04-30 '| COMPETITION_7$Date[i] == '2018-05-28 '|
+   COMPETITION_7$Date[i] == '2018-06-04 '|
+   COMPETITION_7$Date[i] == '2018-09-17 '|
+   COMPETITION_7$Date[i] == '2018-09-24 ' |
+   COMPETITION_7$Date[i] == '2019-03-18  '|
+   COMPETITION_7$Date[i] == '2019-09-09 '|
+   COMPETITION_7$Date[i] == '2019-09-16 '|
+   COMPETITION_7$Date[i] == '2020-03-09 '|
+   COMPETITION_7$Date[i] == '2020-11-16  '|
+   COMPETITION_7$Date[i] == '2021-02-08 '|
+   COMPETITION_7$Date[i] == '2021-02-15  '|
+   COMPETITION_7$Date[i] == ' 2021-02-22 '|
+   COMPETITION_7$Date[i] == ' 2021-05-10  ')
+    {
+    promotional_week_COMPETITION_7[i] = 1}
+  else{
+    promotional_week_COMPETITION_7[i] = 0
+  }
+}
+```
+
+```{r Promotional week SOLE E LUNA ESA, message=FALSE, warning=FALSE}
+SOLE_E_LUNA_ESA <- Customer_A_all %>%
+  filter(PRODOTTO == 'SOLE E LUNA ESA') %>%
+  select(Date, Dim.1)
+
+promotional_week_SOLE_E_LUNA_ESA = vector(mode = 'numeric', length = length(SOLE_E_LUNA_ESA$Date))
+for (i in 1:length(SOLE_E_LUNA_ESA$Date)){
+  if(SOLE_E_LUNA_ESA$Date[i] == '2018-04-23'| SOLE_E_LUNA_ESA$Date[i] == '2018-04-30'|SOLE_E_LUNA_ESA$Date[i] == '2018-07-02'| SOLE_E_LUNA_ESA$Date[i] == '2018-07-09'| SOLE_E_LUNA_ESA$Date[i] == '2018-11-26'| SOLE_E_LUNA_ESA$Date[i] == '2018-12-03'| SOLE_E_LUNA_ESA$Date[i] == '2019-03-18'| SOLE_E_LUNA_ESA$Date[i] == '2019-03-25'| SOLE_E_LUNA_ESA$Date[i] == '2019-07-08'| SOLE_E_LUNA_ESA$Date[i] =='2019-07-15'| SOLE_E_LUNA_ESA$Date[i] =='2019-10-21'| SOLE_E_LUNA_ESA$Date[i] == '2020-03-30'| SOLE_E_LUNA_ESA$Date[i] =='2020-08-10'| SOLE_E_LUNA_ESA$Date[i] == '2020-08-17'| SOLE_E_LUNA_ESA$Date[i] =='2020-08-24'| SOLE_E_LUNA_ESA$Date[i] == '2020-11-16'| SOLE_E_LUNA_ESA$Date[i] =='2020-11-23'| SOLE_E_LUNA_ESA$Date[i] == '2021-02-08'| SOLE_E_LUNA_ESA$Date[i] =='2021-02-15'| SOLE_E_LUNA_ESA$Date[i] == '2021-04-05'| SOLE_E_LUNA_ESA$Date[i] =='2021-05-31'| SOLE_E_LUNA_ESA$Date[i] == '2021-06-07'){
+    promotional_week_SOLE_E_LUNA_ESA[i] = 1}
+  else{
+    promotional_week_SOLE_E_LUNA_ESA[i] = 0
+  }
+}
+
+```
+
+```{r promotional_week SOLE E LUNA CP, message=FALSE, warning=FALSE}
+SOLE_E_LUNA_CP <- Customer_A_all %>%
+  filter(PRODOTTO == 'SOLE E LUNA CP') %>%
+  select(Date, Dim.1)
+
+promotional_week_SOLE_E_LUNA_CP = vector(mode = 'numeric', length = length(SOLE_E_LUNA_CP$Date))
+for (i in 1:length(SOLE_E_LUNA_CP$Date)){
+  if(SOLE_E_LUNA_CP$Date[i] == '2018-05-21'| SOLE_E_LUNA_CP$Date[i] == '2019-04-29 '|SOLE_E_LUNA_CP$Date[i] == '2019-09-02 '| SOLE_E_LUNA_CP$Date[i] == '2019-09-09 '|
+   SOLE_E_LUNA_CP$Date[i] == '2020-01-13 '|
+   SOLE_E_LUNA_CP$Date[i] == '2020-02-24 '|
+   SOLE_E_LUNA_CP$Date[i] == '2020-03-02 ' |
+   SOLE_E_LUNA_CP$Date[i] == '2020-04-27 '|
+   SOLE_E_LUNA_CP$Date[i] == '2020-05-04 '|
+   SOLE_E_LUNA_CP$Date[i] == '2020-07-13 '|
+  SOLE_E_LUNA_CP$Date[i] == '2020-07-20 '|
+   SOLE_E_LUNA_CP$Date[i] == '2020-10-05')
+    {
+    promotional_week_SOLE_E_LUNA_CP[i] = 1}
+  else{
+    promotional_week_SOLE_E_LUNA_CP[i] = 0
+  }
+}
+```
+
+```{r Promotional week NATURELLO, message=FALSE, warning=FALSE}
+NATURELLO <- Customer_A_all %>%
+  filter(PRODOTTO == 'NATURELLO') %>%
+  select(Date, Dim.1)
+
+promotional_week_NATURELLO = vector(mode = 'numeric', length = length(NATURELLO$Date))
+for (i in 1:length(NATURELLO$Date)){
+  if(NATURELLO$Date[i] == '2019-06-24'| NATURELLO$Date[i] == '2019-07-01 '|NATURELLO$Date[i] == '2019-07-22')
+    {
+    promotional_week_NATURELLO[i] = 1}
+  else{
+    promotional_week_NATURELLO[i] = 0
+  }
+}
+```
+
+```{r Promotional week SOLE E LUNA VP, message=FALSE, warning=FALSE}
+SOLE_E_LUNA_VP <- Customer_A_all %>%
+  filter(PRODOTTO == 'SOLE E LUNA VP') %>%
+  select(Date, Dim.1)
+
+promotional_week_SOLE_E_LUNA_VP = vector(mode = 'numeric', length = length(SOLE_E_LUNA_VP$Date))
+for (i in 1:length(SOLE_E_LUNA_VP$Date)){
+  if(SOLE_E_LUNA_VP$Date[i] == '2018-02-26'| SOLE_E_LUNA_VP$Date[i] == '2018-03-05'|SOLE_E_LUNA_VP$Date[i] == '2018-03-26'| SOLE_E_LUNA_VP$Date[i] == '2018-04-02'| SOLE_E_LUNA_VP$Date[i] == '2018-06-25'| SOLE_E_LUNA_VP$Date[i] == '2018-07-16'| SOLE_E_LUNA_VP$Date[i] == '2018-07-23'| SOLE_E_LUNA_VP$Date[i] == '2018-10-01'| SOLE_E_LUNA_VP$Date[i] == '2018-10-22'| SOLE_E_LUNA_VP$Date[i] =='2018-10-29'| SOLE_E_LUNA_VP$Date[i] =='2018-12-24'| SOLE_E_LUNA_VP$Date[i] == '2018-12-31'| SOLE_E_LUNA_VP$Date[i] =='2019-01-07'| SOLE_E_LUNA_VP$Date[i] == '2019-02-18'| SOLE_E_LUNA_VP$Date[i] =='2019-02-25'| SOLE_E_LUNA_VP$Date[i] == '2019-03-04'){
+    promotional_week_SOLE_E_LUNA_VP[i] = 1}
+  else{
+    promotional_week_SOLE_E_LUNA_VP[i] = 0
+  }
+}
+```
+
+```{r Promotional week COMPETITION 15, message=FALSE, warning=FALSE}
+COMPETITION_15 <- Customer_A_all %>%
+  filter(PRODOTTO == 'COMPETITION 15') %>%
+  select(Date, Dim.1)
+
+promotional_week_COMPETITION_15 = vector(mode = 'numeric', length = length(COMPETITION_15$Date))
+for (i in 1:length(COMPETITION_15$Date)){
+  if(COMPETITION_15$Date[i] == '2019-07-22')
+    {
+    promotional_week_COMPETITION_15[i] = 1}
+  else{
+    promotional_week_COMPETITION_15[i] = 0
+  }
+}
+```
+
+```{r Promotional week COMPETITION 25, message=FALSE, warning=FALSE}
+COMPETITION_25 <- Customer_A_all %>%
+  filter(PRODOTTO == 'COMPETITION 25') %>%
+  select(Date, Dim.1)
+
+promotional_week_COMPETITION_25 = vector(mode = 'numeric', length = length(COMPETITION_25$Date))
+for (i in 1:length(COMPETITION_25$Date)){
+  if(COMPETITION_25$Date[i] == '2018-01-29'| COMPETITION_25$Date[i] == '2018-02-05 '|COMPETITION_25$Date[i] == '2018-03-19 '| COMPETITION_25$Date[i] == '2018-03-26 '|
+   COMPETITION_25$Date[i] == '2018-04-02 '|
+   COMPETITION_25$Date[i] == '2018-07-16 '|
+   COMPETITION_25$Date[i] == '2018-07-23 ' |
+   COMPETITION_25$Date[i] == '2018-10-01 '|
+   COMPETITION_25$Date[i] == '2018-10-08 '|
+   COMPETITION_25$Date[i] == '2018-10-15 '|
+  COMPETITION_25$Date[i] == '2019-06-24 '|
+   COMPETITION_25$Date[i] == '2019-07-01'|
+   COMPETITION_25$Date[i] == '2019-09-16')
+    {
+    promotional_week_COMPETITION_25[i] = 1}
+  else{
+    promotional_week_COMPETITION_25[i] = 0
+  }
+}
+```
+
+```{r Promotional week PROGRESSI QUADRI, message=FALSE, warning=FALSE}
+PROGRESSI_QUADRI <- Customer_A_all %>%
+  filter(PRODOTTO == 'PROGRESSI QUADRI') %>%
+  select(Date, Dim.1)
+promotional_week_PROGRESSI_QUADRI = vector(mode = 'numeric', length = length(PROGRESSI_QUADRI$Date))
+for (i in 1:length(PROGRESSI_QUADRI$Date)){
+  if(PROGRESSI_QUADRI$Date[i] == '2018-02-26'| PROGRESSI_QUADRI$Date[i] == '2018-03-05'|PROGRESSI_QUADRI$Date[i] == '2018-11-05'| PROGRESSI_QUADRI$Date[i] == '2018-11-12'| PROGRESSI_QUADRI$Date[i] == '2018-11-19'| PROGRESSI_QUADRI$Date[i] == '2018-12-24'| PROGRESSI_QUADRI$Date[i] == '2018-12-31'| PROGRESSI_QUADRI$Date[i] == '2019-01-07'| PROGRESSI_QUADRI$Date[i] == '2019-02-18'| PROGRESSI_QUADRI$Date[i] =='2019-02-25'| PROGRESSI_QUADRI$Date[i] =='2019-09-23'| PROGRESSI_QUADRI$Date[i] == '2019-09-30'| PROGRESSI_QUADRI$Date[i] =='2019-11-25'| PROGRESSI_QUADRI$Date[i] == '2019-12-02'| PROGRESSI_QUADRI$Date[i] =='2020-03-02'| PROGRESSI_QUADRI$Date[i] == '2020-09-28'| PROGRESSI_QUADRI$Date[i] =='2020-12-07'| PROGRESSI_QUADRI$Date[i] == '2021-02-15'){
+    promotional_week_PROGRESSI_QUADRI[i] = 1}
+  else{
+    promotional_week_PROGRESSI_QUADRI[i] = 0
+  }
+}
+```
+
+```{r promotional week COMPETITION 11, message=FALSE, warning=FALSE}
+COMPETITION_11 <- Customer_A_all %>%
+  filter(PRODOTTO == 'COMPETITION 11') %>%
+  select(Date, Dim.1)
+
+promotional_week_COMPETITION_11 = vector(mode = 'numeric', length = length(COMPETITION_11$Date))
+for (i in 1:length(COMPETITION_11$Date)){
+  if(COMPETITION_11$Date[i] == '2019-06-24'| COMPETITION_11$Date[i] == '2019-07-01 '|COMPETITION_11$Date[i] == '2019-08-05 '| COMPETITION_11$Date[i] == '2019-08-12 '|
+   COMPETITION_11$Date[i] == '2020-06-29 '|
+   COMPETITION_11$Date[i] == '2020-07-06 '|
+   COMPETITION_11$Date[i] == '2021-07-05 ' |
+   COMPETITION_11$Date[i] == '2021-07-12 '|
+   COMPETITION_11$Date[i] == '2021-07-19 ')
+    {
+    promotional_week_COMPETITION_11[i] = 1}
+  else{
+    promotional_week_COMPETITION_11[i] = 0
+  }
+}
+```
+
+```{r promotional week PROGRESSI IL MUTANDINO CP, message=FALSE, warning=FALSE}
+PROGRESSI_IL_MUTANDINO_CP <- Customer_A_all %>%
+  filter(PRODOTTO == 'PROGRESSI IL MUTANDINO CP') %>%
+  select(Date, Dim.1)
+
+promotional_week_PROGRESSI_IL_MUTANDINO_CP= vector(mode = 'numeric', length = length(PROGRESSI_IL_MUTANDINO_CP$Date))
+for (i in 1:length(PROGRESSI_IL_MUTANDINO_CP$Date)){
+  if(PROGRESSI_IL_MUTANDINO_CP$Date[i] == '2018-03-12'| PROGRESSI_IL_MUTANDINO_CP$Date[i] == '2018-03-19'){
+    promotional_week_PROGRESSI_IL_MUTANDINO_CP[i] = 1}
+  else{
+    promotional_week_PROGRESSI_IL_MUTANDINO_CP[i] = 0
+  }
+}
+
+```
+
+```{r promotional week COMPETITION 12, message=FALSE, warning=FALSE}
+COMPETITION_12 <- Customer_A_all %>%
+  filter(PRODOTTO == 'COMPETITION 12') %>%
+  select(Date, Dim.1)
+
+promotional_week_COMPETITION_12 = vector(mode = 'numeric', length = length(COMPETITION_12$Date))
+for (i in 1:length(COMPETITION_12$Date)){
+  if(COMPETITION_12$Date[i] == "2018-10-22"| 
+  COMPETITION_12$Date[i] == "2019-07-08"| 
+  COMPETITION_12$Date[i] == "2019-07-15"|
+  COMPETITION_12$Date[i] == "2019-07-22"|
+  COMPETITION_12$Date[i] == "2019-11-11"| 
+  COMPETITION_12$Date[i] == "2019-11-18"|
+  COMPETITION_12$Date[i] == "2020-05-25"| 
+  COMPETITION_12$Date[i] == "2020-06-01"| 
+  COMPETITION_12$Date[i] == "2020-09-21"| 
+  COMPETITION_12$Date[i] == "2021-01-11"|
+  COMPETITION_12$Date[i] == "2021-06-07"){
+    promotional_week_COMPETITION_12[i] = 1}
+  else{
+    promotional_week_COMPETITION_12[i] = 0
+  }
+}
+```
+
+```{r promotional week BABY DRY IL MUTANDINO SP, message=FALSE, warning=FALSE}
+BABY_DRY_IL_MUTANDINO_SP <- Customer_A_all %>%
+  filter(PRODOTTO == 'BABY DRY IL MUTANDINO SP') %>%
+  select(Date, Dim.1)
+
+promotional_week_BABY_DRY_IL_MUTANDINO_SP = vector(mode = 'numeric', length = length(BABY_DRY_IL_MUTANDINO_SP$Date))
+for (i in 1:length(BABY_DRY_IL_MUTANDINO_SP$Date)){
+  if(BABY_DRY_IL_MUTANDINO_SP$Date[i] == "2018-09-03" | BABY_DRY_IL_MUTANDINO_SP$Date[i] == "2018-09-10"| BABY_DRY_IL_MUTANDINO_SP$Date[i] == "2018-11-05"| BABY_DRY_IL_MUTANDINO_SP$Date[i] == "2018-11-12"| BABY_DRY_IL_MUTANDINO_SP$Date[i] ==   "2018-11-19"| BABY_DRY_IL_MUTANDINO_SP$Date[i] ==    "2019-03-04"| BABY_DRY_IL_MUTANDINO_SP$Date[i] ==    "2019-03-11"| BABY_DRY_IL_MUTANDINO_SP$Date[i] ==    "2019-04-15"| BABY_DRY_IL_MUTANDINO_SP$Date[i] ==     "2019-04-22"| BABY_DRY_IL_MUTANDINO_SP$Date[i] ==      "2019-04-29"| BABY_DRY_IL_MUTANDINO_SP$Date[i] ==       "2019-09-23"| BABY_DRY_IL_MUTANDINO_SP$Date[i] ==        "2019-09-30"| BABY_DRY_IL_MUTANDINO_SP$Date[i] ==        "2019-10-07"| BABY_DRY_IL_MUTANDINO_SP$Date[i] ==        "2019-10-21" | BABY_DRY_IL_MUTANDINO_SP$Date[i] ==        "2019-10-28" | BABY_DRY_IL_MUTANDINO_SP$Date[i] ==         "2019-11-25"| BABY_DRY_IL_MUTANDINO_SP$Date[i] ==         "2019-12-02"| BABY_DRY_IL_MUTANDINO_SP$Date[i] ==         "2020-03-09"){
+    promotional_week_BABY_DRY_IL_MUTANDINO_SP[i] = 1}
+  else{
+    promotional_week_BABY_DRY_IL_MUTANDINO_SP[i] = 0
+  }
+}
+```
+
+```{r promotional week COMPETITION 8, message=FALSE, warning=FALSE}
+COMPETITION_8 <- Customer_A_all %>%
+  filter(PRODOTTO == 'COMPETITION 8') %>%
+  select(Date, Dim.1)
+
+promotional_week_COMPETITION_8 = vector(mode = 'numeric', length = length(COMPETITION_8$Date))
+for (i in 1:length(COMPETITION_8$Date)){
+  if(COMPETITION_8$Date[i] == '2019-09-23'|COMPETITION_8$Date[i]=='2019-09-30'|COMPETITION_8$Date[i]=='2019-10-07'|COMPETITION_8$Date[i]=='2020-03-09')
+    {
+    promotional_week_COMPETITION_8[i] = 1}
+  else{
+    promotional_week_COMPETITION_8[i] = 0
+  }
+}
+```
+
+```{r promotional week BABY DRY DWCT, message=FALSE, warning=FALSE}
+BABY_DRY_DWCT <- Customer_A_all %>%
+  filter(PRODOTTO == 'BABY DRY DWCT') %>%
+  select(Date, Dim.1)
+
+
+promotional_week_BABY_DRY_DWCT = vector(mode = 'numeric', length = length(BABY_DRY_DWCT$Date))
+for (i in 1:length(BABY_DRY_DWCT$Date)){
+  if(BABY_DRY_DWCT$Date[i] == '2018-03-26'|BABY_DRY_DWCT$Date[i]=='2018-08-27'|BABY_DRY_DWCT$Date[i]=='2018-09-03'|BABY_DRY_DWCT$Date[i]=='2018-09-10'|BABY_DRY_DWCT$Date[i]=='2018-11-05'|BABY_DRY_DWCT$Date[i]=='2018-11-12'|BABY_DRY_DWCT$Date[i]=='2018-11-19'|BABY_DRY_DWCT$Date[i]=='2019-03-04'|BABY_DRY_DWCT$Date[i]=='2019-03-11'|BABY_DRY_DWCT$Date[i]=='2019-03-11'|BABY_DRY_DWCT$Date[i]=='2019-04-15'|BABY_DRY_DWCT$Date[i]=='2019-04-22'|BABY_DRY_DWCT$Date[i]=='2019-04-29'|BABY_DRY_DWCT$Date[i]=='2019-09-23'|BABY_DRY_DWCT$Date[i]=='2019-09-30'|BABY_DRY_DWCT$Date[i]=='2019-10-07'|BABY_DRY_DWCT$Date[i]=='2019-12-02'|BABY_DRY_DWCT$Date[i]=='2020-03-09')
+    {
+    promotional_week_BABY_DRY_DWCT[i] = 1}
+  else{
+    promotional_week_BABY_DRY_DWCT[i] = 0
+  }
+}
+```
+
+Once we have created all the vectors for the training data-set we can build our support vector machine. 
+
+* We create a new data-set which contains only the products of the training sample (svm_train).
+
+* We built a new vector (promotional_weeks) which contains all the vectors for the promotional weeks previously created. The order in which these vectors are organized is fundamental: it must be the same order in which the products appear in the original data-set. In such way, we can link the value of the vector 'promotional_weeks' with a specific row of the 'svm_train' data-set.
+
+* We display all the data on a plot with the first dimension of the PCA as x axis and the second dimension as y axes, colored by the promotional_weeks variable.
+
+
+```{r training  SVM, message=FALSE, warning=FALSE}
+svm_train <- Customer_A_all %>%
+  filter(PRODOTTO == 'BABY DRY DUO DWCT'| 
+           PRODOTTO == 'BABY DRY DWCT'| 
+           PRODOTTO == 'BABY DRY IL MUTANDINO SP'|
+           PRODOTTO == 'NATURELLO'|
+           PRODOTTO == 'PROGRESSI IL MUTANDINO CP'|
+           PRODOTTO == 'PROGRESSI QUADRI'|
+           PRODOTTO == 'SOLE E LUNA CP'|
+           PRODOTTO == 'SOLE E LUNA ESA'|
+           PRODOTTO == 'SOLE E LUNA VP'| 
+           PRODOTTO == 'COMPETITION 7'| 
+           PRODOTTO == 'COMPETITION 8'|
+           PRODOTTO == 'COMPETITION 11'|
+           PRODOTTO == 'COMPETITION 12'|
+           PRODOTTO == 'COMPETITION 15'|
+           PRODOTTO == 'COMPETITION 25') %>%
+  select(Date,Dim.1,Dim.2)
+
+promotional_weeks = c(promotional_week_BABY_DRY_DUO_DWCT, 
+                      promotional_week_BABY_DRY_DWCT,
+                      promotional_week_BABY_DRY_IL_MUTANDINO_SP,
+                      promotional_week_NATURELLO,
+                      promotional_week_PROGRESSI_IL_MUTANDINO_CP,
+                      promotional_week_PROGRESSI_QUADRI,
+                      promotional_week_SOLE_E_LUNA_CP, 
+                      promotional_week_SOLE_E_LUNA_ESA,
+                      promotional_week_SOLE_E_LUNA_VP,
+                      promotional_week_COMPETITION_7,
+                      promotional_week_COMPETITION_8,
+                      promotional_week_COMPETITION_11, 
+                      promotional_week_COMPETITION_12, 
+                      promotional_week_COMPETITION_15, 
+                      promotional_week_COMPETITION_25)
+
+#for the svm function we need the classification variable as a factor.
+svm_train <- svm_train %>%
+  mutate(promotional_weeks = as.factor(promotional_weeks))
+
+ggplot(svm_train, mapping = aes(Dim.1, Dim.2, color = promotional_weeks)) +
+  geom_point()
+
+```
+
+* We use the tune function to calculate the best parameters to use in our svm model. 
+  * We specified the variable on which we want to classify our data (promotional_weeks), the data-set to use, the type of kernel that we have chosen (for further information about the kernel choice check the Report) and the range of values for the parameter that we want to optimize.
+
+* The table function allows us to see that the model misclassifies 76 dates (it returns 35 dates as promotional weeks but they are not and it returns 41 dates as not promotional ones but they are). 
+The rows (of the table) referred to the results obtained by the svm whereas the column referred to the results previously calculated.
+
+```{r training  SVM 2, message=FALSE, warning=FALSE}
+#### LINEAR KERNEL ----
+
+tune.out <- tune(svm, promotional_weeks~ ., data = svm_train , kernel = "linear",
+                  ranges = list(cost = c(0.1,1,2,3,4,5)))
+
+#this is the svm model computed using the results of the tune function
+
+best_model_linear <- tune.out$best.model
+
+# This is the resulting plot. It's different from our expectation, maybe there is some problem with some graphical parameters because the results are very good. In some case we obtain a properly divided scatter plot as we have shown in the  report.
+
+plot(tune.out$best.model, svm_train, Dim.2 ~ Dim.1)
+
+table(tune.out$best.model$fitted, svm_train$promotional_weeks)
+
+```
+
+
+* With the roc function (by the library pROC) we represent the ROC (Receiver Operating Characteristic) plot and the relative Area under the curve (AUC).
+
+```{r training SVM 2, message=FALSE, warning=FALSE}
+# ROC
+roc(svm_train$promotional_weeks, as.numeric(best_model_linear$fitted), plot=TRUE, legacy.axes=TRUE, percent=TRUE, 
+    xlab="False Positive Percentage", ylab="True Postive Percentage", 
+    col="#e86e0b", lwd=4, print.auc=TRUE, print.auc.x=45, auc.polygon = TRUE,
+    auc.polygon.col = "#ffbf5f")
+
+#we save all the information about the rocplot in another variable (e.g. sensitivity, specificity)
+roc.info <- roc(svm_train$promotional_weeks, as.numeric(best_model_linear$fitted), plot= FALSE)
+
+```
+
+
+* The last step of our process consists of calculating the promotional weeks for the testing data-set.
+We use the function predict which takes as input the model and the new data.
+
+```{r PROGRESSI CP svm, message=FALSE, warning=FALSE}
+
+svm_PROGRESSI_CP <- Customer_A_all %>%
+  filter(PRODOTTO == "PROGRESSI CP") %>%
+  select(Date, Dim.1, Dim.2)
+
+promotional_week_PROGRESSI_CP <- as.data.frame(predict(best_model_linear, svm_PROGRESSI_CP))
+
+colnames(promotional_week_PROGRESSI_CP) <- "promotional"
+
+#here we save in the vector promotional_week_PROGESSI_CP only the promotional weeks calculated for this product by our model.
+promotional_week_PROGRESSI_CP <- promotional_week_PROGRESSI_CP %>%
+  filter(promotional == 1)
+
+```
